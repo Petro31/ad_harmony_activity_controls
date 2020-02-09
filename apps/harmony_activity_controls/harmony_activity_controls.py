@@ -2,6 +2,7 @@ import appdaemon.plugins.hass.hassapi as hass
 import voluptuous as vol
 import json
 import os
+import shutil
 
 MODULE = 'harmony_activity_controls'
 CLASS = 'ActivityControls'
@@ -19,6 +20,7 @@ CONF_NAME = 'name'
 CONF_CUSTOM_EVENTS = 'custom_events'
 CONF_EVENT = 'event'
 CONF_ICON = 'icon'
+CONF_ENTITY_PICTURE = 'entity_picture'
 CONF_MAKE_SCRIPTS = 'make_scripts'
 
 LOG_DEBUG = 'DEBUG'
@@ -33,10 +35,13 @@ HARMONY_ID = 'id'
 
 ATTRIBUTE_FRIENDLY_NAME = 'friendly_name'
 ATTRIBUTE_ICON = 'icon'
+ATTRIBUTE_ENTITY_PICTURE = 'entity_picture'
 ATTRIBUTE_DEVICE = 'device'
 ATTRIBUTE_COMMAND = 'command'
 ATTRIBUTE_ACTIVITY = 'activity'
 ATTRIBUTE_CURRENT_ACTIVITY = 'current_activity'
+
+ICON_GROUP = 'icon_group'
 
 ACTIVITY_GROUP = 'activity_group'
 ACTIVITY_OFF = 'PowerOff'
@@ -56,20 +61,23 @@ EVENT_ACTIVITY_SCHEMA = {
     vol.Required(CONF_DEVICE): str,
     vol.Required(CONF_COMMAND): str,
     vol.Optional(CONF_NAME): str,
-    vol.Optional(CONF_ICON): str,
+    vol.Exclusive(CONF_ICON, ICON_GROUP): str,
+    vol.Exclusive(CONF_ENTITY_PICTURE, ICON_GROUP): str,
 }
 
 EVENT_SCHEMA = {
     vol.Required(CONF_EVENT): str,
     vol.Required(CONF_ACTIVITIES): [EVENT_ACTIVITY_SCHEMA],
-    vol.Optional(CONF_ICON): str,
     vol.Optional(CONF_NAME): str,
+    vol.Exclusive(CONF_ICON, ICON_GROUP): str,
+    vol.Exclusive(CONF_ENTITY_PICTURE, ICON_GROUP): str,
 }
 
 COMMAND_SCHEMA = {
     vol.Required(CONF_COMMAND): str,
     vol.Optional(CONF_NAME): str,
-    vol.Optional(CONF_ICON): str,
+    vol.Exclusive(CONF_ICON, ICON_GROUP): str,
+    vol.Exclusive(CONF_ENTITY_PICTURE, ICON_GROUP): str,
 }
 
 APP_SCHEMA = vol.Schema({
@@ -137,7 +145,9 @@ COMMAND_NAMES = {
 }
 
 DEFAULT_ICON = 'mdi:eye'
-
+DEFAULT_IMAGE_NAME = 'transparent.png'
+DEFAULT_IMAGE_ABS_PATH = '/config/www/harmony_activity_controls'
+DEFAULT_IMAGE_PATH = '/local/harmony_activity_controls'
 
 class ActivityControls(hass.Hass):
     def initialize(self):
@@ -147,6 +157,9 @@ class ActivityControls(hass.Hass):
         # Set Lazy Logging (to not have to restart appdaemon)
         self._level = args.get(CONF_LOG_LEVEL)
         self.log(args, level=self._level)
+
+        self._absolute_module_path = os.path.split(os.path.abspath(__file__))[0]
+        self._absolute_default_image = os.path.join(DEFAULT_IMAGE_ABS_PATH, DEFAULT_IMAGE_NAME)
 
         self._remote = args.get(CONF_REMOTE)
         self._event_name = self._remote.replace('.','_')
@@ -191,7 +204,7 @@ class ActivityControls(hass.Hass):
             lines.append(f"  - event: {self._event_name}")
             lines.append(f"    event_data: {event.data}")
             lines.append(f"")
-        pth = os.path.join(os.path.split(os.path.abspath(__file__))[0], f'{self.name}_scripts_yaml.txt')
+        pth = os.path.join(self._absolute_module_path, f'{self.name}_scripts_yaml.txt')
         self.log(f"Creating script yaml ({pth})", level=self._level)
         with open(pth, 'w') as fh:
             fh.write('\n'.join(lines))
@@ -259,16 +272,18 @@ class ActivityControls(hass.Hass):
                     name = commanddict.get(CONF_NAME, command)
                     icon = commanddict.get(
                         CONF_ICON, COMMAND_ICONS.get(command, DEFAULT_ICON))
+                    image = commanddict.get(CONF_ENTITY_PICTURE)
                 else:
                     command = commanddict
                     name = COMMAND_NAMES.get(command, command)
                     icon = COMMAND_ICONS.get(command, DEFAULT_ICON)
+                    image = None
 
                 if command not in self._commands:
                     self.log(
                         f"'{CONF_COMMAND}: {command}' in '{CONF_COMMANDS}' not found in {self._harmony_config_dir}", level=LOG_WARNING)
 
-                events[command] = Event(self, command, name, icon)
+                events[command] = Event(self, command, name, icon, image)
                 for activitydict in args.get(CONF_ACTIVITIES):
                     in_activity = activitydict.get(CONF_ACTIVITY)
                     out_activity = self.get_activity(in_activity)
@@ -278,7 +293,7 @@ class ActivityControls(hass.Hass):
 
                     if out_activity is not None and out_device is not None:
                         events[command][out_activity.name] = EventActivity(
-                            events[command], out_activity.name, out_device.name, command, name, icon)
+                            events[command], out_activity.name, out_device.name, command, name, icon, image)
                     else:
                         if out_activity is None:
                             activity = (CONF_ACTIVITY, in_activity)
@@ -288,6 +303,9 @@ class ActivityControls(hass.Hass):
                             device = (CONF_DEVICE, in_device)
                             if device not in unknown:
                                 unknown.append(device)
+                
+                if events[command].finalize():
+                    self._create_default_image()
 
             for field, result in unknown:
                 self.log(
@@ -299,8 +317,9 @@ class ActivityControls(hass.Hass):
             eventicon = custom_event.get(
                 CONF_ICON, COMMAND_ICONS.get(command, DEFAULT_ICON))
             eventname = custom_event.get(CONF_NAME, event)
+            eventimage = custom_event.get(CONF_ENTITY_PICTURE)
 
-            events[event] = Event(self, event, eventname, eventicon)
+            events[event] = Event(self, event, eventname, eventicon, eventimage)
 
             for activitydict in custom_event.get(CONF_ACTIVITIES):
                 in_activity = activitydict.get(CONF_ACTIVITY)
@@ -315,8 +334,9 @@ class ActivityControls(hass.Hass):
                         CONF_NAME, COMMAND_NAMES.get(command, eventname))
                     icon = activitydict.get(
                         CONF_ICON, COMMAND_ICONS.get(command, eventicon))
+                    image = activitydict.get(CONF_ENTITY_PICTURE)
                     events[event][out_activity.name] = EventActivity(
-                        events[event], out_activity.name, out_device.name, command, name, icon)
+                        events[event], out_activity.name, out_device.name, command, name, icon, image)
                 else:
                     if out_activity is None:
                         self.log(
@@ -328,7 +348,21 @@ class ActivityControls(hass.Hass):
                         self.log(
                             f"'{CONF_COMMAND}: {command}' in '{CONF_EVENT}: {events[event].event}, {CONF_ACTIVITY}: {in_activity}' not found in {self._harmony_config_dir}", level=LOG_WARNING)
 
+            if events[event].finalize():
+                self._create_default_image()
+
         self._events = events
+
+    def _create_default_image(self):
+        if not os.path.exists(self._absolute_default_image):
+            if not os.path.exists(DEFAULT_IMAGE_ABS_PATH):
+                try:
+                    os.mkdir(DEFAULT_IMAGE_ABS_PATH)
+                except FileNotFoundError:
+                    self.log(f"Could not make {DEFAULT_IMAGE_ABS_PATH}!  Make sure /config/www exists!", level=LOG_WARNING)
+
+            src = os.path.join(self._absolute_module_path, DEFAULT_IMAGE_NAME)
+            shutil.copyfile(src, self._absolute_default_image)
 
     def _get_harmony_config(self, remote):
         """ Gets the harmony configuration """
@@ -410,13 +444,14 @@ class Device(object):
 
 
 class EventActivity(object):
-    def __init__(self, parent, activity, device, command, name, icon):
+    def __init__(self, parent, activity, device, command, name, icon, image):
         self._parent = parent
         self.activity = activity
         self.device = device
         self.command = command
         self.name = name
         self.icon = icon
+        self.image = image
 
     @property
     def state(self):
@@ -424,13 +459,17 @@ class EventActivity(object):
 
     @property
     def attributes(self):
-        return {
+        ret = {
             ATTRIBUTE_ACTIVITY: self.activity,
             ATTRIBUTE_COMMAND: self.command,
             ATTRIBUTE_DEVICE: self.device,
             ATTRIBUTE_FRIENDLY_NAME: self.name,
-            ATTRIBUTE_ICON: self.icon,
         }
+        if self.image is not None:
+            ret[ATTRIBUTE_ENTITY_PICTURE] = self.image
+        if self.icon is not None:
+            ret[ATTRIBUTE_ICON] = self.icon
+        return ret
 
     def __repr__(self):
         meat = ', '.join([f'"{k}":"{v}"' for k, v in self.attributes.items()])
@@ -438,17 +477,27 @@ class EventActivity(object):
 
     def __str__(self):
         meat = ', '.join([f'{k}<{v}>' for k, v in self.attributes.items() if k not in [
-                         ATTRIBUTE_FRIENDLY_NAME, ATTRIBUTE_ICON]])
+                         ATTRIBUTE_FRIENDLY_NAME, ATTRIBUTE_ICON, ATTRIBUTE_ENTITY_PICTURE]])
         return f"Activity({meat})"
 
 
 class Event(object):
-    def __init__(self, parent, event, name, icon):
+    def __init__(self, parent, event, name, icon, image):
         self._parent = parent
         self.event = event
         self._activities = {}
         self._activities[ACTIVITY_OFF] = EventActivity(
-            self, ACTIVITY_OFF, None, None, name, icon)
+            self, ACTIVITY_OFF, None, None, name, icon, image)
+
+    def finalize(self):
+        has_image = [ activity.image is not None for activity in self._activities.values() ]
+        if all(has_image) or any(has_image):
+            for activity in self._activities.values():
+                activity.icon = None
+                if activity.image is None:
+                    activity.image = os.path.join(DEFAULT_IMAGE_PATH, DEFAULT_IMAGE_NAME)
+            return True
+        return False
 
     @property
     def entity_id(self):
