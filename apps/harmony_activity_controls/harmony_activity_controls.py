@@ -7,21 +7,22 @@ import shutil
 MODULE = 'harmony_activity_controls'
 CLASS = 'ActivityControls'
 
-CONF_MODULE = 'module'
+CONF_ACTIVITIES = 'activities'
+CONF_ACTIVITY = 'activity'
 CONF_CLASS = 'class'
-CONF_REMOTE = 'remote'
-CONF_LOG_LEVEL = 'log_level'
-CONF_DEVICE = 'device'
+CONF_COLOR = 'color'
 CONF_COMMAND = 'command'
 CONF_COMMANDS = 'commands'
-CONF_ACTIVITY = 'activity'
-CONF_ACTIVITIES = 'activities'
-CONF_NAME = 'name'
 CONF_CUSTOM_EVENTS = 'custom_events'
+CONF_DEVICE = 'device'
+CONF_ENTITY_PICTURE = 'entity_picture'
 CONF_EVENT = 'event'
 CONF_ICON = 'icon'
-CONF_ENTITY_PICTURE = 'entity_picture'
+CONF_LOG_LEVEL = 'log_level'
 CONF_MAKE_SCRIPTS = 'make_scripts'
+CONF_MODULE = 'module'
+CONF_NAME = 'name'
+CONF_REMOTE = 'remote'
 
 LOG_DEBUG = 'DEBUG'
 LOG_ERROR = 'ERROR'
@@ -29,17 +30,18 @@ LOG_INFO = 'INFO'
 LOG_WARNING = 'WARNING'
 
 HARMONY_ACTIVITIES = 'Activities'
-HARMONY_DEVICES = 'Devices'
 HARMONY_COMMANDS = 'commands'
+HARMONY_DEVICES = 'Devices'
 HARMONY_ID = 'id'
 
+ATTRIBUTE_ACTIVITY = 'activity'
+ATTRIBUTE_COLOR = 'color'
+ATTRIBUTE_COMMAND = 'command'
+ATTRIBUTE_CURRENT_ACTIVITY = 'current_activity'
+ATTRIBUTE_DEVICE = 'device'
+ATTRIBUTE_ENTITY_PICTURE = 'entity_picture'
 ATTRIBUTE_FRIENDLY_NAME = 'friendly_name'
 ATTRIBUTE_ICON = 'icon'
-ATTRIBUTE_ENTITY_PICTURE = 'entity_picture'
-ATTRIBUTE_DEVICE = 'device'
-ATTRIBUTE_COMMAND = 'command'
-ATTRIBUTE_ACTIVITY = 'activity'
-ATTRIBUTE_CURRENT_ACTIVITY = 'current_activity'
 
 ICON_GROUP = 'icon_group'
 
@@ -61,6 +63,7 @@ EVENT_ACTIVITY_SCHEMA = {
     vol.Required(CONF_DEVICE): str,
     vol.Required(CONF_COMMAND): str,
     vol.Optional(CONF_NAME): str,
+    vol.Optional(CONF_COLOR): str,
     vol.Exclusive(CONF_ICON, ICON_GROUP): str,
     vol.Exclusive(CONF_ENTITY_PICTURE, ICON_GROUP): str,
 }
@@ -69,6 +72,7 @@ EVENT_SCHEMA = {
     vol.Required(CONF_EVENT): str,
     vol.Required(CONF_ACTIVITIES): [EVENT_ACTIVITY_SCHEMA],
     vol.Optional(CONF_NAME): str,
+    vol.Optional(CONF_COLOR): str,
     vol.Exclusive(CONF_ICON, ICON_GROUP): str,
     vol.Exclusive(CONF_ENTITY_PICTURE, ICON_GROUP): str,
 }
@@ -76,6 +80,7 @@ EVENT_SCHEMA = {
 COMMAND_SCHEMA = {
     vol.Required(CONF_COMMAND): str,
     vol.Optional(CONF_NAME): str,
+    vol.Optional(CONF_COLOR): str,
     vol.Exclusive(CONF_ICON, ICON_GROUP): str,
     vol.Exclusive(CONF_ENTITY_PICTURE, ICON_GROUP): str,
 }
@@ -149,6 +154,7 @@ DEFAULT_IMAGE_NAME = 'transparent.png'
 DEFAULT_IMAGE_ABS_PATH = '/config/www/harmony_activity_controls'
 DEFAULT_IMAGE_PATH = '/local/harmony_activity_controls'
 
+
 class ActivityControls(hass.Hass):
     def initialize(self):
 
@@ -158,11 +164,13 @@ class ActivityControls(hass.Hass):
         self._level = args.get(CONF_LOG_LEVEL)
         self.log(args, level=self._level)
 
-        self._absolute_module_path = os.path.split(os.path.abspath(__file__))[0]
-        self._absolute_default_image = os.path.join(DEFAULT_IMAGE_ABS_PATH, DEFAULT_IMAGE_NAME)
+        self._absolute_module_path = os.path.split(
+            os.path.abspath(__file__))[0]
+        self._absolute_default_image = os.path.join(
+            DEFAULT_IMAGE_ABS_PATH, DEFAULT_IMAGE_NAME)
 
         self._remote = args.get(CONF_REMOTE)
-        self._event_name = self._remote.replace('.','_')
+        self._event_name = self._remote.replace('.', '_')
 
         self._harmony_config = self._get_harmony_config(self._remote)
         self.log(
@@ -183,7 +191,8 @@ class ActivityControls(hass.Hass):
                  level=self._level)
         for event in self._events.values():
             self.log(f'Creating Listener {event}', level=self._level)
-            self.listen_event(self.harmony_event, self._event_name, **event.data)
+            self.listen_event(self.harmony_event,
+                              self._event_name, **event.data)
 
         self.handle = self.listen_state(
             self.update_sensors_callback, self._remote, attribute=ATTRIBUTE_CURRENT_ACTIVITY)
@@ -204,7 +213,8 @@ class ActivityControls(hass.Hass):
             lines.append(f"  - event: {self._event_name}")
             lines.append(f"    event_data: {event.data}")
             lines.append(f"")
-        pth = os.path.join(self._absolute_module_path, f'{self.name}_scripts_yaml.txt')
+        pth = os.path.join(self._absolute_module_path,
+                           f'{self.name}_scripts_yaml.txt')
         self.log(f"Creating script yaml ({pth})", level=self._level)
         with open(pth, 'w') as fh:
             fh.write('\n'.join(lines))
@@ -222,11 +232,12 @@ class ActivityControls(hass.Hass):
                     control_state = STATE_ON
             else:
                 off_sensor = event.get(ACTIVITY_OFF)
-                self.set_state(event.entity_id, state=STATE_OFF, attributes=off_sensor.attributes)
+                self.set_state(event.entity_id, state=STATE_OFF,
+                               attributes=off_sensor.attributes)
 
         sensor = f"{SENSOR}.{self._event_name}_control"
         attributes = {
-            ATTRIBUTE_FRIENDLY_NAME: sensor.replace('_',' ').title()
+            ATTRIBUTE_FRIENDLY_NAME: sensor.replace('_', ' ').title()
         }
         self.set_state(sensor, state=control_state, attributes=attributes)
 
@@ -257,7 +268,8 @@ class ActivityControls(hass.Hass):
                     }
                     self.log(
                         f"Call service: 'remote.send_command', data={data}.", level=self._level)
-                    self.call_service('remote/send_command', entity_id=self._remote, **data)
+                    self.call_service('remote/send_command',
+                                      entity_id=self._remote, **data)
 
     def harmony_service(self):
         self.log(kwargs, level=self._level)
@@ -273,17 +285,20 @@ class ActivityControls(hass.Hass):
                     icon = commanddict.get(
                         CONF_ICON, COMMAND_ICONS.get(command, DEFAULT_ICON))
                     image = commanddict.get(CONF_ENTITY_PICTURE)
+                    color = commanddict.get(CONF_COLOR)
                 else:
                     command = commanddict
                     name = COMMAND_NAMES.get(command, command)
                     icon = COMMAND_ICONS.get(command, DEFAULT_ICON)
                     image = None
+                    color = None
 
                 if command not in self._commands:
                     self.log(
                         f"'{CONF_COMMAND}: {command}' in '{CONF_COMMANDS}' not found in {self._harmony_config_dir}", level=LOG_WARNING)
 
-                events[command] = Event(self, command, name, icon, image)
+                events[command] = Event(
+                    self, command, name, icon, image)
                 for activitydict in args.get(CONF_ACTIVITIES):
                     in_activity = activitydict.get(CONF_ACTIVITY)
                     out_activity = self.get_activity(in_activity)
@@ -293,7 +308,14 @@ class ActivityControls(hass.Hass):
 
                     if out_activity is not None and out_device is not None:
                         events[command][out_activity.name] = EventActivity(
-                            events[command], out_activity.name, out_device.name, command, name, icon, image)
+                            events[command],
+                            out_activity.name,
+                            out_device.name,
+                            command,
+                            name,
+                            icon,
+                            image,
+                            color)
                     else:
                         if out_activity is None:
                             activity = (CONF_ACTIVITY, in_activity)
@@ -303,7 +325,7 @@ class ActivityControls(hass.Hass):
                             device = (CONF_DEVICE, in_device)
                             if device not in unknown:
                                 unknown.append(device)
-                
+
                 if events[command].finalize():
                     self._create_default_image()
 
@@ -318,8 +340,10 @@ class ActivityControls(hass.Hass):
                 CONF_ICON, COMMAND_ICONS.get(command, DEFAULT_ICON))
             eventname = custom_event.get(CONF_NAME, event)
             eventimage = custom_event.get(CONF_ENTITY_PICTURE)
+            eventcolor = custom_event.get(CONF_COLOR)
 
-            events[event] = Event(self, event, eventname, eventicon, eventimage)
+            events[event] = Event(self, event, eventname,
+                                  eventicon, eventimage)
 
             for activitydict in custom_event.get(CONF_ACTIVITIES):
                 in_activity = activitydict.get(CONF_ACTIVITY)
@@ -334,9 +358,10 @@ class ActivityControls(hass.Hass):
                         CONF_NAME, COMMAND_NAMES.get(command, eventname))
                     icon = activitydict.get(
                         CONF_ICON, COMMAND_ICONS.get(command, eventicon))
-                    image = activitydict.get(CONF_ENTITY_PICTURE)
+                    image = activitydict.get(CONF_ENTITY_PICTURE, eventimage)
+                    color = activitydict.get(CONF_COLOR, eventcolor)
                     events[event][out_activity.name] = EventActivity(
-                        events[event], out_activity.name, out_device.name, command, name, icon, image)
+                        events[event], out_activity.name, out_device.name, command, name, icon, image, color)
                 else:
                     if out_activity is None:
                         self.log(
@@ -359,7 +384,8 @@ class ActivityControls(hass.Hass):
                 try:
                     os.mkdir(DEFAULT_IMAGE_ABS_PATH)
                 except FileNotFoundError:
-                    self.log(f"Could not make {DEFAULT_IMAGE_ABS_PATH}!  Make sure /config/www exists!", level=LOG_WARNING)
+                    self.log(
+                        f"Could not make {DEFAULT_IMAGE_ABS_PATH}!  Make sure /config/www exists!", level=LOG_WARNING)
 
             src = os.path.join(self._absolute_module_path, DEFAULT_IMAGE_NAME)
             shutil.copyfile(src, self._absolute_default_image)
@@ -444,7 +470,7 @@ class Device(object):
 
 
 class EventActivity(object):
-    def __init__(self, parent, activity, device, command, name, icon, image):
+    def __init__(self, parent, activity, device, command, name, icon, image, color):
         self._parent = parent
         self.activity = activity
         self.device = device
@@ -452,6 +478,7 @@ class EventActivity(object):
         self.name = name
         self.icon = icon
         self.image = image
+        self.color = color
 
     @property
     def state(self):
@@ -469,6 +496,8 @@ class EventActivity(object):
             ret[ATTRIBUTE_ENTITY_PICTURE] = self.image
         if self.icon is not None:
             ret[ATTRIBUTE_ICON] = self.icon
+        if self.color is not None:
+            ret[ATTRIBUTE_COLOR] = self.color
         return ret
 
     def __repr__(self):
@@ -487,15 +516,17 @@ class Event(object):
         self.event = event
         self._activities = {}
         self._activities[ACTIVITY_OFF] = EventActivity(
-            self, ACTIVITY_OFF, None, None, name, icon, image)
+            self, ACTIVITY_OFF, None, None, name, icon, image, None)
 
     def finalize(self):
-        has_image = [ activity.image is not None for activity in self._activities.values() ]
+        has_image = [
+            activity.image is not None for activity in self._activities.values()]
         if all(has_image) or any(has_image):
             for activity in self._activities.values():
                 activity.icon = None
                 if activity.image is None:
-                    activity.image = os.path.join(DEFAULT_IMAGE_PATH, DEFAULT_IMAGE_NAME)
+                    activity.image = os.path.join(
+                        DEFAULT_IMAGE_PATH, DEFAULT_IMAGE_NAME)
             return True
         return False
 
