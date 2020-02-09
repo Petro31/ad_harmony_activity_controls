@@ -26,8 +26,6 @@ LOG_ERROR = 'ERROR'
 LOG_INFO = 'INFO'
 LOG_WARNING = 'WARNING'
 
-EVENT = 'harmony_activity_command'
-
 HARMONY_ACTIVITIES = 'Activities'
 HARMONY_DEVICES = 'Devices'
 HARMONY_COMMANDS = 'commands'
@@ -151,6 +149,7 @@ class ActivityControls(hass.Hass):
         self.log(args, level=self._level)
 
         self._remote = args.get(CONF_REMOTE)
+        self._event_name = self._remote.replace('.','_')
 
         self._harmony_config = self._get_harmony_config(self._remote)
         self.log(
@@ -171,7 +170,7 @@ class ActivityControls(hass.Hass):
                  level=self._level)
         for event in self._events.values():
             self.log(f'Creating Listener {event}', level=self._level)
-            self.listen_event(self.harmony_event, EVENT, **event.data)
+            self.listen_event(self.harmony_event, self._event_name, **event.data)
 
         self.handle = self.listen_state(
             self.update_sensors_callback, self._remote, attribute=ATTRIBUTE_CURRENT_ACTIVITY)
@@ -187,10 +186,9 @@ class ActivityControls(hass.Hass):
     def _make_scripts_yaml(self):
         lines = []
         for event in self._events.values():
-            activity = event.get(ACTIVITY_OFF)
-            lines.append(f"{activity.entity_id.split('.')[-1]}:")
+            lines.append(f"{event.entity_id.split('.')[-1]}:")
             lines.append(f"  sequence:")
-            lines.append(f"  - event: {EVENT}")
+            lines.append(f"  - event: {self._event_name}")
             lines.append(f"    event_data: {event.data}")
             lines.append(f"")
         pth = os.path.join(os.path.split(os.path.abspath(__file__))[0], f'{self.name}_scripts_yaml.txt')
@@ -201,14 +199,23 @@ class ActivityControls(hass.Hass):
     def update_sensors_callback(self, entity, attribute, old, new, kwargs):
         self.log(
             f'update_sensors_callback: {entity}.{attribute} {old} -> {new}', level=self._level)
+        control_state = STATE_OFF
         for event in self._events.values():
             sensor = event.get(new)
             if sensor is not None:
-                self.set_state(sensor.entity_id, state=sensor.state,
+                self.set_state(event.entity_id, state=sensor.state,
                                attributes=sensor.attributes)
+                if control_state == STATE_OFF and sensor.state == STATE_ON:
+                    control_state = STATE_ON
             else:
                 self.log(
                     f"Event {event.event} has no activity {new}!", level=LOG_ERROR)
+
+        sensor = f"{SENSOR}.{self._event_name}_control"
+        attributes = {
+            ATTRIBUTE_FRIENDLY_NAME: sensor.replace('_',' ').title()
+        }
+        self.set_state(sensor, state=control_state, attributes=attributes)
 
     def harmony_event(self, event_name, data, kwargs):
         event = data.get(CONF_COMMAND)
@@ -261,7 +268,7 @@ class ActivityControls(hass.Hass):
                     self.log(
                         f"'{CONF_COMMAND}: {command}' in '{CONF_COMMANDS}' not found in {self._harmony_config_dir}", level=LOG_WARNING)
 
-                events[command] = Event(command, name, icon)
+                events[command] = Event(self, command, name, icon)
                 for activitydict in args.get(CONF_ACTIVITIES):
                     in_activity = activitydict.get(CONF_ACTIVITY)
                     out_activity = self.get_activity(in_activity)
@@ -293,7 +300,7 @@ class ActivityControls(hass.Hass):
                 CONF_ICON, COMMAND_ICONS.get(command, DEFAULT_ICON))
             eventname = custom_event.get(CONF_NAME, event)
 
-            events[event] = Event(event, eventname, eventicon)
+            events[event] = Event(self, event, eventname, eventicon)
 
             for activitydict in custom_event.get(CONF_ACTIVITIES):
                 in_activity = activitydict.get(CONF_ACTIVITY)
@@ -416,10 +423,6 @@ class EventActivity(object):
         return STATE_OFF if self.activity == ACTIVITY_OFF else STATE_ON
 
     @property
-    def entity_id(self):
-        return f"{SENSOR}.harmony_command_{self._parent.event.lower()}"
-
-    @property
     def attributes(self):
         return {
             ATTRIBUTE_ACTIVITY: self.activity,
@@ -440,11 +443,16 @@ class EventActivity(object):
 
 
 class Event(object):
-    def __init__(self, event, name, icon):
+    def __init__(self, parent, event, name, icon):
+        self._parent = parent
         self.event = event
         self._activities = {}
         self._activities[ACTIVITY_OFF] = EventActivity(
             self, ACTIVITY_OFF, None, None, name, icon)
+
+    @property
+    def entity_id(self):
+        return f"{SENSOR}.{self._parent._event_name}_{self.event.lower()}"
 
     @property
     def data(self):
