@@ -221,8 +221,8 @@ class ActivityControls(hass.Hass):
                 if control_state == STATE_OFF and sensor.state == STATE_ON:
                     control_state = STATE_ON
             else:
-                self.log(
-                    f"Event {event.event} has no activity {new}!", level=LOG_ERROR)
+                off_sensor = event.get(ACTIVITY_OFF)
+                self.set_state(event.entity_id, state=STATE_OFF, attributes=off_sensor.attributes)
 
         sensor = f"{SENSOR}.{self._event_name}_control"
         attributes = {
